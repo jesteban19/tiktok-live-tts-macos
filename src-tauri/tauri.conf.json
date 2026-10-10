@@ -1,0 +1,49 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "TikTok Live TTS",
+  "version": "0.1.0",
+  "identifier": "dev.joseph.tiktok-live-tts",
+  "build": {
+    "beforeDevCommand": "npm run prepare:native && npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run prepare:native && npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "TikTok Live TTS",
+        "width": 1320,
+        "height": 850,
+        "minWidth": 980,
+        "minHeight": 640
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "app",
+      "dmg"
+    ],
+    "resources": {
+      "resources/speech-helper": "speech-helper",
+      "resources/bridge.cjs": "bridge.cjs",
+      "resources/node": "node",
+      "resources/NODE-LICENSE.txt": "NODE-LICENSE.txt"
+    },
+    "macOS": {
+      "minimumSystemVersion": "13.0"
+    },
+    "shortDescription": "Lector local de comentarios TikTok LIVE con voces macOS",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns"
+    ]
+  }
+}

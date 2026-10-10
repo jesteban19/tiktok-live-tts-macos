@@ -1,0 +1,2 @@
+import {describe,it,expect} from 'vitest';import {newer} from './state';import type {Snapshot} from '../types';
+describe('orden de respuestas IPC',()=>{it('no permite que una respuesta antigua sobrescriba un evento nuevo',()=>{const state={revision:5} as Snapshot;expect(newer(state,{revision:4} as Snapshot)).toBe(false);expect(newer(state,{revision:6} as Snapshot)).toBe(true);expect(newer(null,state)).toBe(true);});});

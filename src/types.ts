@@ -1,0 +1,5 @@
+export interface Comment {id:string;user:string;text:string;timestamp:number;source:'demo'|'real'|'test';status:string}
+export interface Voice {id:string;name:string;language:string}
+export interface Settings {username:string;voice:string;rate:number;volume:number;automatic:boolean;max_queue:number;max_age_seconds:number;max_length:number;blocked_words:string[];muted_users:string[];ignore_emoji:boolean;deduplicate:boolean;save_history:boolean;auto_scroll:boolean;theme:'dark'|'light'}
+export interface Snapshot {settings:Settings;connection:string;mode:'demo'|'real';message:string;comments:Comment[];queue:Comment[];current:Comment|null;paused:boolean;voices:Voice[];speech_ready:boolean;history:Comment[];received:number;filtered:number;played:number;revision:number}
+export type Action = {type:'snapshot'|'disconnect'|'pause'|'resume'|'stop'|'next'|'clear_view'|'clear_queue'|'test_voice'|'history'|'clear_history'}|{type:'connect';username:string;mode:'demo'|'real'}|{type:'settings';settings:Settings}|{type:'enqueue'|'remove';id:string};

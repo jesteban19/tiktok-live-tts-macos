@@ -1,0 +1,12 @@
+import {spawn} from 'node:child_process';
+import {createInterface} from 'node:readline';
+import {mkdirSync,writeFileSync} from 'node:fs';
+import {validUsername} from '../bridge/protocol.mjs';
+const username=process.argv[2];if(!validUsername(username??''))throw new Error('Uso: node tests/live-probe.mjs usuario [segundos] [--bundled]');
+const seconds=Math.max(5,Math.min(120,Number(process.argv[3]??30)));
+const bundled=process.argv.includes('--bundled');
+const child=spawn(bundled?'src-tauri/resources/node':process.execPath,[bundled?'src-tauri/resources/bridge.cjs':'bridge/live.mjs',username],{stdio:['pipe','pipe','pipe']});
+let comments=0,nonempty=0;const statuses=[],samples=[];
+createInterface({input:child.stdout}).on('line',line=>{const e=JSON.parse(line);if(e.kind==='comment'){comments++;if(e.text.trim().length>0)nonempty++;samples.push({id:e.id,textLength:e.text.length,source:e.source});console.log(`Comentario real: ${e.text.length} caracteres.`);}else{statuses.push(e);console.log(e);}});
+child.stderr.on('data',d=>process.stderr.write(d));const timeout=setTimeout(()=>child.stdin.write('stop\n'),seconds*1000);
+child.on('exit',code=>{clearTimeout(timeout);mkdirSync('work',{recursive:true});const result={username,bundled,comments,nonempty,statuses,samples,exitCode:code};writeFileSync('work/live-probe.json',JSON.stringify(result,null,2));console.log(`Eventos: ${comments}; con texto real: ${nonempty}.`);if(code!==0||nonempty===0)process.exitCode=1;});

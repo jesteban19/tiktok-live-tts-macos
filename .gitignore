@@ -1,0 +1,17 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/resources/speech-helper
+src-tauri/resources/bridge.cjs
+src-tauri/resources/node
+.toolchain/
+work/
+.DS_Store
+*.db
+*.db-shm
+*.db-wal
+tsconfig.tsbuildinfo
+src-tauri/gen/
+.env
+.env.*
+!.env.example
