@@ -74,6 +74,8 @@ mod tests {
             let s = Settings {
                 username: "ana".into(),
                 save_history: true,
+                read_username: true,
+                read_gifts: true,
                 ..Settings::default()
             };
             db.save(&s).unwrap();
@@ -83,12 +85,15 @@ mod tests {
                 text: "hola".into(),
                 timestamp: 1,
                 source: "demo".into(),
+                kind: "comment".into(),
                 status: "played".into(),
             })
             .unwrap();
         }
         let db = Database::open(&path).unwrap();
         assert_eq!(db.load().unwrap().username, "ana");
+        assert!(db.load().unwrap().read_username);
+        assert!(db.load().unwrap().read_gifts);
         assert_eq!(db.history().unwrap().len(), 1);
         db.clear().unwrap();
         assert!(db.history().unwrap().is_empty());

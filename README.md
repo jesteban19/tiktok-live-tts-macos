@@ -6,18 +6,23 @@ Aplicación de escritorio para la comunidad de macOS, construida con Tauri y Rus
 
 El TTS funciona localmente, sin suscripciones ni servicios de generación de voz. La conexión a TikTok es **no oficial** y depende de servicios externos de TikTok y de firma; consulta [Conexión real y firma](#conexión-real-y-firma).
 
-**Estado: MVP 0.1.0.** El modo demostración y la lectura de comentarios de un LIVE real se validaron en un Mac Apple Silicon. Este repositorio distribuye el código fuente para compilarlo localmente; no incluye un instalador firmado ni un paquete universal.
+**Estado: MVP 0.2.0.** El modo demostración y la lectura de comentarios de un LIVE real se validaron en un Mac Apple Silicon. Este repositorio distribuye el código fuente para compilarlo localmente; no incluye un instalador firmado ni un paquete universal.
 
 ![Captura de TikTok Live TTS para macOS](./screenshot.png)
 
 ## Funcionalidades
 
 - Conexión a TikTok LIVE por nombre de usuario, desconexión y reintentos con backoff.
-- Modo demostración con comentarios simulados identificados como **DEMO**; el audio usa voces reales de macOS.
+- Modo demostración con comentarios, espectadores y regalos simulados identificados como **DEMO**; el audio usa voces reales de macOS.
 - Comentarios reales identificados como **LIVE**, sin sustituir errores de conexión por datos simulados.
 - Voces instaladas de macOS, selección por idioma, velocidad, volumen y prueba de voz.
 - Cola FIFO: una sola lectura a la vez, con pausa, reanudación, salto y eliminación de pendientes.
 - Lectura automática o selección manual de comentarios.
+- Opción **Leer nombre del usuario**: escucha `usuario dice: comentario` o solo el texto. Se guarda automáticamente.
+- Contador de espectadores **actuales**, actualizado con los eventos de TikTok; muestra `—` si no hay dato o se desconecta.
+- Regalos con remitente, nombre y cantidad; las rachas se cuentan una vez, al finalizar. Lista de los últimos 100 envíos y total de la sesión.
+- Opción **Anunciar regalos**, desactivada por defecto; comparte la cola de voz y respeta palabras bloqueadas y usuarios silenciados.
+- Solo comentarios y regalos nuevos desde cada conexión: se descarta el historial inicial y los eventos anteriores, también al reconectar.
 - Filtros de palabras, usuarios silenciados, duplicados, longitud y mensajes compuestos solo por emojis o símbolos.
 - Límite y caducidad configurables para la cola.
 - Preferencias persistentes en SQLite e historial opcional, desactivado por defecto.
@@ -147,7 +152,9 @@ Compilar localmente no implica firma Developer ID ni notarización. Para distrib
 3. **Elegir qué escuchar:** desactiva **Lectura automática** y usa el botón de reproducción de cada comentario. Los comentarios bloqueados por filtros no admiten lectura manual.
 4. **Configurar la voz:** elige idioma, voz, velocidad y volumen. Pulsa **Guardar** antes de **Probar voz**. Los cambios se aplican a la siguiente locución.
 5. **Moderar:** abre **Filtros y moderación**, ajusta palabras bloqueadas, usuarios, longitud, capacidad y caducidad, y guarda los cambios. Los filtros se aplican a los nuevos comentarios.
-6. **Guardar historial:** activa su opción si quieres conservar comentarios entre sesiones. Puedes borrarlo desde **Historial**.
+6. **Nombre y regalos:** en el reproductor activa **Leer nombre del usuario** y/o **Anunciar regalos**. Se guardan automáticamente; cambiar el nombre afecta la próxima lectura, y activar regalos afecta los nuevos envíos. Los anuncios funcionan aunque la selección de comentarios sea manual.
+7. **Ver actividad:** debajo de la conexión se muestran espectadores actuales y regalos de la sesión. Abre **Regalos** para ver remitentes, nombres y cantidades. En demostración se generan regalos cada tres comentarios; las cifras aparecen como simuladas.
+8. **Guardar historial:** activa su opción si quieres conservar comentarios entre sesiones. Puedes borrarlo desde **Historial**.
 
 | Control       | Comportamiento                                                      |
 | ------------- | ------------------------------------------------------------------- |
@@ -191,7 +198,9 @@ La clave se transmite al servicio de firma mediante el conector; no se almacena 
 - Las preferencias y el historial opcional se guardan en `app.db`, dentro del directorio Application Support de la app (`dev.joseph.tiktok-live-tts`).
 - El historial está desactivado por defecto y se limita a 5.000 registros; la vista de historial muestra hasta 1.000.
 - La vista reciente conserva hasta 300 comentarios. La cola admite entre 1 y 100 pendientes, con caducidad configurable de 1 a 3.600 segundos.
-- La deduplicación textual compara autor y texto durante 60 segundos. La cola activa no se restaura al reiniciar.
+- La deduplicación textual compara autor y texto durante 60 segundos. La cola activa no se restaura al reiniciar y consultar el historial no lo encola. Una nueva conexión vacía la cola anterior, detiene su lectura y reinicia las cifras y vistas de sesión.
+- El puente conserva `common.createTime`, descarta envolturas `isHistory` y mantiene `processInitialData: false`. Solo acepta comentarios/regalos fechados desde la conexión actual y deduplica sus identificadores. Al reconectar se actualiza ese límite. Si TikTok omite la hora, se descarta el evento para evitar leer mensajes antiguos. Cuando la hora viene con precisión de segundos, también se descarta el segundo en que se conectó (puede perderse menos de un segundo de mensajes nuevos).
+- El contador de espectadores usa `total` del evento `WebcastRoomUserSeqMessage`, no `totalUser` (visitantes acumulados). Los regalos y su total viven en memoria durante la sesión; no se guardan como comentarios en el historial.
 - La voz usa AVSpeechSynthesizer de macOS; la app no envía el texto a una API comercial de TTS.
 - El modo real sí establece conexiones con TikTok y el proveedor de firma. El modo demostración no contacta TikTok.
 
@@ -221,7 +230,7 @@ node tests/live-probe.mjs usuario_en_live 30 --bundled
 
 La prueba LIVE solo recibe comentarios y guarda identificadores, procedencia y longitud de texto en `work/live-probe.json`; no guarda sus cuerpos ni credenciales. `work/` está excluido de Git.
 
-La validación inicial obtuvo **19 pruebas automatizadas correctas**, una `.app` compilada y comentarios reales leídos por macOS. Consulta [VALIDATION.md](VALIDATION.md) para el alcance y las limitaciones observadas. Una conexión exitosa en una sesión no garantiza disponibilidad futura.
+La validación de esta versión obtuvo **32 pruebas automatizadas correctas**, una `.app` compilada, regalos DEMO leídos por macOS y espectadores recibidos del LIVE real. Se comprobó también que los comentarios antiguos reenviados por TikTok quedan descartados. La lectura de comentarios reales se validó en la versión inicial. Consulta [VALIDATION.md](VALIDATION.md) para el alcance y las limitaciones observadas. Una conexión exitosa en una sesión no garantiza disponibilidad futura.
 
 ## Arquitectura
 

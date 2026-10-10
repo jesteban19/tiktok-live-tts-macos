@@ -1,8 +1,28 @@
-# Validación del MVP — 10 de octubre de 2026
+# Validación — 10 de octubre de 2026
 
-Validación inicial en macOS Apple Silicon. Las rutas de desarrollo y las herramientas locales del autor no son requisitos para compilar desde una copia nueva.
+Validaciones en macOS Apple Silicon. Las rutas de desarrollo y las herramientas locales del autor no son requisitos para compilar desde una copia nueva.
 
-## Resultados comprobados
+## Versión 0.2.0: nombres, espectadores, regalos y comentarios nuevos
+
+| Comprobación | Resultado |
+| --- | --- |
+| Frontend | TypeScript y Vite OK; 1 prueba Vitest OK |
+| Puente TikTok | 9 pruebas Node OK: contratos proto v3, hora original, historial, reconexión, IDs, espectadores actuales y rachas de regalos |
+| Backend | 22 pruebas Rust OK: TTS con/sin nombre, cola de regalos, moderación, persistencia y reapertura sin lectura del historial, además de regresiones del MVP |
+| Migración local | Preferencias y comentarios de 0.1.0 cargan con valores predeterminados para los campos nuevos |
+| Análisis Rust | `cargo clippy --all-targets -- -D warnings` OK |
+| Compilación | `.app` 0.2.0 generada para Apple Silicon, aproximadamente 123 MiB |
+| Ventana real | Opciones de nombre/regalos seleccionables; espectadores simulados visibles; regalo DEMO Rosa × 3 con estado Leído y cola terminada |
+| LIVE real | Puente conectado a `josephestebandev`; eventos de espectadores actuales con valores 6 y 5 |
+| Historial reenviado por TikTok | Una sonda de metadatos del conector recibió 6 CHAT antiguos, de aproximadamente 20–35 minutos antes; el puente nuevo no los entregó a la cola |
+
+En total, **32 pruebas automatizadas** correctas. Los regalos se probaron con payloads proto v3 y con la demostración; no se compraron ni observaron regalos reales durante esta comprobación. En la prueba real de 30 segundos se recibieron espectadores, sin comentarios nuevos entregados por el puente. La sonda de metadatos confirmó que TikTok reenvía comentarios anteriores incluso con `processInitialData: false`; sus horas originales quedan fuera del límite nuevo. No hubo un comentario recién enviado durante esa comprobación, por lo que no acredita nueva lectura de comentarios en producción. La recepción de comentarios reales de 0.1.0 está documentada abajo.
+
+La protección contra historial ahora conserva la fecha de TikTok y descarta envolturas marcadas `isHistory`, eventos anteriores al inicio de la conexión y eventos sin hora válida. La biblioteca se configura con `processInitialData: false`. Una reconexión establece otro límite temporal. Con precisión de segundos se descarta también el segundo de conexión para evitar una lectura antigua (pueden perderse menos de un segundo de mensajes nuevos). Rust añade una segunda comprobación temporal y deduplicación de IDs; limpiar la vista no permite un replay.
+
+Al conectar otra sesión se detiene la lectura anterior, se vacía la cola y se reinician comentarios y métricas de sesión. Al abrir la aplicación solo se recuperan las preferencias; consultar el historial tampoco encola sus comentarios. Los espectadores se muestran como `—` hasta recibir un dato actual y tras desconectarse. Las rachas de regalos se cuentan/anuncian una sola vez, al terminar; los regalos de distintos envíos siguen siendo independientes aunque sean del mismo usuario. Ambas preferencias nuevas son persistentes y están desactivadas por defecto.
+
+## Resultados de la validación inicial (0.1.0)
 
 | Comprobación | Resultado |
 | --- | --- |

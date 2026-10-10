@@ -15,11 +15,27 @@ pub struct Comment {
     pub text: String,
     pub timestamp: u64,
     pub source: String,
+    #[serde(default = "comment_kind")]
+    pub kind: String,
     #[serde(default = "received")]
     pub status: String,
 }
 fn received() -> String {
     "received".into()
+}
+fn comment_kind() -> String {
+    "comment".into()
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Gift {
+    pub id: String,
+    pub user: String,
+    pub name: String,
+    pub count: u64,
+    pub timestamp: u64,
+    pub source: String,
+    #[serde(default = "received")]
+    pub status: String,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
@@ -29,6 +45,8 @@ pub struct Settings {
     pub rate: f32,
     pub volume: f32,
     pub automatic: bool,
+    pub read_username: bool,
+    pub read_gifts: bool,
     pub max_queue: usize,
     pub max_age_seconds: u64,
     pub max_length: usize,
@@ -48,6 +66,8 @@ impl Default for Settings {
             rate: 0.5,
             volume: 0.85,
             automatic: true,
+            read_username: false,
+            read_gifts: false,
             max_queue: 20,
             max_age_seconds: 60,
             max_length: 240,
@@ -204,6 +224,9 @@ pub struct Snapshot {
     pub received: u64,
     pub filtered: u64,
     pub played: u64,
+    pub viewer_count: Option<u64>,
+    pub gifts: Vec<Gift>,
+    pub gift_count: u64,
     pub revision: u64,
 }
 impl Default for Snapshot {
@@ -223,6 +246,9 @@ impl Default for Snapshot {
             received: 0,
             filtered: 0,
             played: 0,
+            viewer_count: None,
+            gifts: vec![],
+            gift_count: 0,
             revision: 0,
         }
     }
@@ -238,6 +264,7 @@ mod tests {
             text: text.into(),
             timestamp: 1000,
             source: "demo".into(),
+            kind: "comment".into(),
             status: received(),
         }
     }
@@ -299,5 +326,14 @@ mod tests {
         s.max_length = 2;
         assert!(p.accept(&c("2", "ñéí"), &s, 1000).is_err());
         assert!(p.accept(&c("3", "ñé"), &s, 1000).is_ok());
+    }
+    #[test]
+    fn older_saved_settings_and_comments_migrate_with_safe_defaults() {
+        let settings: Settings =
+            serde_json::from_str(r#"{"username":"ana","automatic":true}"#).unwrap();
+        assert!(!settings.read_username);
+        assert!(!settings.read_gifts);
+        let comment: Comment = serde_json::from_str(r#"{"id":"old","user":"ana","text":"hola","timestamp":1,"source":"real","status":"played"}"#).unwrap();
+        assert_eq!(comment.kind, "comment");
     }
 }

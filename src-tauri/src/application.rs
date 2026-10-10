@@ -6,7 +6,7 @@ use crate::{
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::path::PathBuf;
+use std::{collections::VecDeque, path::PathBuf};
 use tauri::{AppHandle, Emitter};
 use tokio::{
     sync::{mpsc, oneshot},
@@ -50,6 +50,8 @@ pub struct Actor {
     app: Option<AppHandle>,
     speech_token: Option<String>,
     utterance: u64,
+    session_started: u64,
+    seen: VecDeque<String>,
 }
 impl Actor {
     pub fn new(
@@ -75,6 +77,8 @@ impl Actor {
             app,
             speech_token: None,
             utterance: 0,
+            session_started: now(),
+            seen: VecDeque::new(),
         })
     }
     pub fn set_speech(&mut self, speech: Box<dyn SpeechEngine>) {
@@ -89,6 +93,9 @@ impl Actor {
         self.state.clone()
     }
     fn status(&mut self, id: &str, status: &str) {
+        if let Some(gift) = self.state.gifts.iter_mut().find(|gift| gift.id == id) {
+            gift.status = status.into();
+        }
         if let Some(c) = self.state.comments.iter_mut().find(|c| c.id == id) {
             c.status = status.into();
         }
@@ -100,7 +107,7 @@ impl Actor {
                 .find(|c| c.id == id)
                 .cloned()
                 .or_else(|| self.state.current.as_ref().filter(|c| c.id == id).cloned());
-            if let Some(mut c) = candidate {
+            if let Some(mut c) = candidate.filter(|c| c.kind == "comment") {
                 c.status = status.into();
                 if let Err(e) = self.db.record(&c) {
                     self.state.message = format!("Error guardando historial: {e}");
@@ -145,8 +152,23 @@ impl Actor {
                 let mut s = self.state.settings.clone();
                 s.username = user.clone();
                 self.db.save(&s)?;
+                if self.speech.is_some() {
+                    self.voice(json!({"command":"stop"})).await?;
+                }
+                self.speech_token = None;
+                self.finish_current("detenido");
+                self.clear_queue();
                 self.invalidate_connection();
+                self.session_started = now();
+                self.seen.clear();
                 self.processor = Processor::default();
+                self.state.comments.clear();
+                self.state.gifts.clear();
+                self.state.gift_count = 0;
+                self.state.viewer_count = None;
+                self.state.received = 0;
+                self.state.filtered = 0;
+                self.state.played = 0;
                 self.state.settings = s;
                 self.state.mode = mode.clone();
                 self.state.connection = "connecting".into();
@@ -174,6 +196,7 @@ impl Actor {
             Action::Disconnect => {
                 self.invalidate_connection();
                 self.state.connection = "disconnected".into();
+                self.state.viewer_count = None;
                 self.state.message =
                     "Desconectado. La cola pendiente puede seguir leyéndose.".into();
             }
@@ -250,6 +273,7 @@ impl Actor {
                     text: "Hola. Esta es la voz de TikTok Live TTS.".into(),
                     timestamp: now(),
                     source: "test".into(),
+                    kind: "comment".into(),
                     status: "queued".into(),
                 };
                 self.queue.push(c, self.state.settings.max_queue)?;
@@ -277,11 +301,10 @@ impl Actor {
             return;
         }
         // Transport IDs are idempotent even when textual deduplication is disabled.
-        if self.state.comments.iter().any(|old| old.id == c.id) {
+        if !self.fresh(&c.id, c.timestamp, &c.source) {
             return;
         }
         self.state.received += 1;
-        c.timestamp = now();
         match self.processor.accept(&c, &self.state.settings, now()) {
             Ok(text) => {
                 c.text = text;
@@ -307,6 +330,105 @@ impl Actor {
             self.state.comments.remove(0);
         }
     }
+    fn fresh(&mut self, id: &str, timestamp: u64, source: &str) -> bool {
+        if (source == "real" && timestamp < self.session_started)
+            || self.seen.iter().any(|old| old == id)
+        {
+            return false;
+        }
+        self.seen.push_back(id.into());
+        if self.seen.len() > 5000 {
+            self.seen.pop_front();
+        }
+        true
+    }
+    pub fn receive_gift(&mut self, mut gift: Gift) {
+        if gift.id.len() > 200
+            || gift.user.len() > 200
+            || gift.name.len() > 500
+            || gift.count == 0
+            || gift.count > 1_000_000
+            || !self.fresh(&gift.id, gift.timestamp, &gift.source)
+        {
+            return;
+        }
+        self.state.gift_count = self.state.gift_count.saturating_add(gift.count);
+        if self.state.settings.read_gifts {
+            let mut c = Comment {
+                id: gift.id.clone(),
+                user: gift.user.clone(),
+                text: format!("Regalo recibido: {} {}.", gift.count, gift.name),
+                timestamp: gift.timestamp,
+                source: gift.source.clone(),
+                kind: "gift".into(),
+                status: "queued".into(),
+            };
+            // Apply moderation to announcements too; gifts remain visible and counted.
+            let gift_settings = Settings {
+                deduplicate: false,
+                ..self.state.settings.clone()
+            };
+            match self.processor.accept(&c, &gift_settings, now()) {
+                Ok(text) => {
+                    c.text = text;
+                    gift.status = match self.queue.push(c, self.state.settings.max_queue) {
+                        Ok(()) => "queued".into(),
+                        Err(reason) => format!("descartado: {reason}"),
+                    };
+                }
+                Err(reason) => gift.status = format!("filtrado: {reason}"),
+            }
+        }
+        self.state.gifts.push(gift);
+        if self.state.gifts.len() > 100 {
+            self.state.gifts.remove(0);
+        }
+    }
+    fn receive_live(&mut self, event: LiveEvent) {
+        match event {
+            LiveEvent::Comment {
+                id,
+                user,
+                text,
+                timestamp,
+                source,
+            } => self.receive(Comment {
+                id,
+                user,
+                text,
+                timestamp,
+                source,
+                kind: "comment".into(),
+                status: "received".into(),
+            }),
+            LiveEvent::Gift { gift } => self.receive_gift(gift),
+            LiveEvent::Viewers { count } => {
+                if self.state.connection == "connected" {
+                    self.state.viewer_count = Some(count);
+                }
+            }
+            LiveEvent::Status { status, message } => {
+                if status == "connected" {
+                    self.session_started = now();
+                }
+                self.state.viewer_count = None;
+                self.state.connection = status;
+                self.state.message = message;
+            }
+            LiveEvent::Notice { message } => self.state.message = message,
+        }
+    }
+    fn speech_text(&self, c: &Comment) -> String {
+        if self.state.settings.read_username && c.source != "test" {
+            if c.kind == "gift" {
+                format!("{}. {}", c.user, c.text)
+            } else {
+                format!("{} dice: {}", c.user, c.text)
+            }
+        } else {
+            c.text.clone()
+        }
+    }
     pub async fn tick(&mut self) {
         for c in self
             .queue
@@ -320,7 +442,7 @@ impl Actor {
         if let Some(mut c) = self.queue.pop() {
             self.utterance += 1;
             let token = format!("speech-{}", self.utterance);
-            let payload = json!({"command":"speak","id":token,"text":c.text,"voice":self.state.settings.voice,"rate":self.state.settings.rate,"volume":self.state.settings.volume});
+            let payload = json!({"command":"speak","id":token,"text":self.speech_text(&c),"voice":self.state.settings.voice,"rate":self.state.settings.rate,"volume":self.state.settings.volume});
             match self.voice(payload).await {
                 Ok(()) => {
                     c.status = "speaking".into();
@@ -383,12 +505,8 @@ impl Actor {
             tokio::select! {
                 message=rx.recv()=>{let Some(message)=message else{break};match message {
                     Message::Request(action,reply)=>{let result=self.action(action).await;let _=reply.send(result);continue;},
-                    Message::Live(g,event) if g==self.generation=>match event {
-                        LiveEvent::Comment{id,user,text,timestamp,source}=>self.receive(Comment{id,user,text,timestamp,source,status:"received".into()}),
-                        LiveEvent::Status{status,message}=>{self.state.connection=status;self.state.message=message;},
-                        LiveEvent::Notice{message}=>{self.state.message=message;}
-                    },
-                    Message::ConnectorError(g,error) if g==self.generation=>{if !["ended","offline"].contains(&self.state.connection.as_str()){self.state.connection="error".into();self.state.message=error;}},
+                    Message::Live(g,event) if g==self.generation=>self.receive_live(event),
+                    Message::ConnectorError(g,error) if g==self.generation=>{self.state.viewer_count=None;if !["ended","offline"].contains(&self.state.connection.as_str()){self.state.connection="error".into();self.state.message=error;}},
                     Message::Speech(value)=>self.handle_speech(value).await,
                     _=>continue,
                 }self.tick().await;self.publish();},
@@ -434,6 +552,7 @@ mod tests {
             text: format!("Comentario {id}"),
             timestamp: now(),
             source: "demo".into(),
+            kind: "comment".into(),
             status: "received".into(),
         }
     }
@@ -525,5 +644,186 @@ mod tests {
         assert!(a.state.paused);
         assert!(a.state.current.is_none());
         assert_eq!(a.queue.pending.len(), 1);
+    }
+    #[tokio::test]
+    async fn username_option_changes_audio_only_and_skips_voice_test() {
+        let (mut a, calls) = fixture();
+        a.receive(c("1"));
+        a.tick().await;
+        assert_eq!(calls.lock().unwrap()[0]["text"], "Comentario 1");
+        a.handle_speech(json!({"kind":"finished","id":"speech-1"}))
+            .await;
+        a.state.settings.read_username = true;
+        a.receive(c("2"));
+        a.tick().await;
+        assert_eq!(calls.lock().unwrap()[1]["text"], "ana dice: Comentario 2");
+        assert_eq!(a.state.comments[1].text, "Comentario 2");
+        assert_eq!(
+            a.speech_text(&Comment {
+                source: "test".into(),
+                ..c("3")
+            }),
+            "Comentario 3"
+        );
+    }
+    fn gift(id: &str) -> Gift {
+        Gift {
+            id: id.into(),
+            user: "ana".into(),
+            name: "Rosa".into(),
+            count: 3,
+            timestamp: now(),
+            source: "demo".into(),
+            status: "received".into(),
+        }
+    }
+    #[tokio::test]
+    async fn gifts_count_once_and_share_fifo_without_counting_as_comments() {
+        let (mut a, calls) = fixture();
+        a.receive_gift(gift("gift:1"));
+        assert_eq!(a.state.gift_count, 3);
+        assert!(a.queue.pending.is_empty());
+        a.state.settings.read_gifts = true;
+        a.state.settings.read_username = true;
+        a.receive(c("1"));
+        a.receive_gift(gift("gift:2"));
+        a.receive_gift(gift("gift:2"));
+        a.receive_gift(gift("gift:3"));
+        assert_eq!(a.state.gift_count, 9);
+        assert_eq!(a.state.received, 1);
+        assert_eq!(a.queue.pending.len(), 3);
+        a.tick().await;
+        assert_eq!(a.state.current.as_ref().unwrap().id, "1");
+        a.handle_speech(json!({"kind":"finished","id":"speech-1"}))
+            .await;
+        a.tick().await;
+        assert_eq!(
+            calls.lock().unwrap()[1]["text"],
+            "ana. Regalo recibido: 3 Rosa."
+        );
+        a.handle_speech(json!({"kind":"finished","id":"speech-2"}))
+            .await;
+        assert_eq!(a.state.gifts[1].status, "played");
+        assert_eq!(a.state.gifts[2].status, "queued");
+    }
+    #[test]
+    fn gift_announcements_respect_muted_users() {
+        let (mut a, _) = fixture();
+        a.state.settings.read_gifts = true;
+        a.state.settings.muted_users = vec!["ana".into()];
+        a.receive_gift(gift("gift:1"));
+        assert_eq!(a.state.gift_count, 3);
+        assert!(a.queue.pending.is_empty());
+        assert_eq!(a.state.gifts[0].status, "filtrado: usuario silenciado");
+    }
+    #[test]
+    fn old_live_messages_are_rejected_without_rewriting_original_time() {
+        let (mut a, _) = fixture();
+        a.session_started = 2000;
+        a.receive(Comment {
+            source: "real".into(),
+            timestamp: 1000,
+            ..c("old")
+        });
+        a.receive(Comment {
+            source: "real".into(),
+            timestamp: 0,
+            ..c("unknown")
+        });
+        a.receive_gift(Gift {
+            source: "real".into(),
+            timestamp: 1000,
+            ..gift("gift:old")
+        });
+        assert!(a.state.comments.is_empty());
+        assert!(a.state.gifts.is_empty());
+        a.receive(Comment {
+            source: "real".into(),
+            timestamp: 2001,
+            ..c("new")
+        });
+        assert_eq!(a.state.comments[0].timestamp, 2001);
+        a.state.comments.clear();
+        a.receive(Comment {
+            source: "real".into(),
+            timestamp: 2001,
+            ..c("new")
+        });
+        assert_eq!(a.state.received, 1); // clearing the view cannot permit a replay.
+    }
+    #[tokio::test]
+    async fn new_session_clears_previous_audio_queue_and_metrics() {
+        let (mut a, calls) = fixture();
+        a.receive(c("old"));
+        a.receive(c("pending"));
+        a.tick().await;
+        a.state.viewer_count = Some(42);
+        a.receive_gift(gift("gift:old"));
+        a.action(Action::Connect {
+            username: "demo".into(),
+            mode: "demo".into(),
+        })
+        .await
+        .unwrap();
+        assert!(a.state.current.is_none());
+        assert!(a.queue.pending.is_empty());
+        assert!(a.state.comments.is_empty());
+        assert!(a.state.gifts.is_empty());
+        assert_eq!(a.state.gift_count, 0);
+        assert_eq!(a.state.viewer_count, None);
+        assert_eq!(calls.lock().unwrap().last().unwrap()["command"], "stop");
+    }
+    #[test]
+    fn viewer_count_is_live_and_unavailable_after_disconnect() {
+        let (mut a, _) = fixture();
+        a.receive_live(LiveEvent::Viewers { count: 100 });
+        assert_eq!(a.state.viewer_count, None);
+        a.receive_live(LiveEvent::Status {
+            status: "connected".into(),
+            message: "ok".into(),
+        });
+        a.receive_live(LiveEvent::Viewers { count: 42 });
+        assert_eq!(a.state.viewer_count, Some(42));
+        a.receive_live(LiveEvent::Viewers { count: 0 });
+        assert_eq!(a.state.viewer_count, Some(0));
+        a.receive_live(LiveEvent::Status {
+            status: "reconnecting".into(),
+            message: "retry".into(),
+        });
+        assert_eq!(a.state.viewer_count, None);
+    }
+    #[tokio::test]
+    async fn reopening_loads_preferences_and_history_without_speaking_old_comments() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.db");
+        let db = Database::open(&path).unwrap();
+        db.save(&Settings {
+            save_history: true,
+            read_username: true,
+            read_gifts: true,
+            ..Settings::default()
+        })
+        .unwrap();
+        db.record(&c("saved-old")).unwrap();
+        drop(db);
+        let (tx, _) = mpsc::channel(16);
+        let mut a = Actor::new(Database::open(&path).unwrap(), PathBuf::new(), tx, None).unwrap();
+        let calls = Arc::new(Mutex::new(vec![]));
+        a.set_speech(Box::new(FakeSpeech(calls.clone())));
+        a.state.speech_ready = true;
+        a.action(Action::History).await.unwrap();
+        assert!(a.state.settings.read_username);
+        assert!(a.state.settings.read_gifts);
+        assert_eq!(a.state.history.len(), 1);
+        assert!(a.state.comments.is_empty());
+        assert!(a.queue.pending.is_empty());
+        assert!(calls.lock().unwrap().is_empty());
+        a.receive(Comment {
+            timestamp: a.session_started.saturating_sub(1),
+            source: "real".into(),
+            ..c("replayed")
+        });
+        a.tick().await;
+        assert!(calls.lock().unwrap().is_empty());
     }
 }

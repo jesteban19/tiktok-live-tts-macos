@@ -1,4 +1,7 @@
-use crate::{application::Message, domain::now};
+use crate::{
+    application::Message,
+    domain::{now, Gift},
+};
 use async_trait::async_trait;
 use serde::Deserialize;
 use std::path::PathBuf;
@@ -17,6 +20,13 @@ pub enum LiveEvent {
         text: String,
         timestamp: u64,
         source: String,
+    },
+    Viewers {
+        count: u64,
+    },
+    Gift {
+        #[serde(flatten)]
+        gift: Gift,
     },
     Status {
         status: String,
@@ -76,6 +86,44 @@ impl LiveConnector for MockLiveConnector {
             if tx.send(Message::Live(generation, event)).await.is_err() {
                 return Ok(());
             }
+            if tx
+                .send(Message::Live(
+                    generation,
+                    LiveEvent::Viewers {
+                        count: 120 + (i * 7 % 35),
+                    },
+                ))
+                .await
+                .is_err()
+            {
+                return Ok(());
+            }
+            if i.is_multiple_of(3)
+                && tx
+                    .send(Message::Live(
+                        generation,
+                        LiveEvent::Gift {
+                            gift: Gift {
+                                id: format!("gift:demo:{generation}:{i}"),
+                                user: user.into(),
+                                name: if i.is_multiple_of(6) {
+                                    "Corazón"
+                                } else {
+                                    "Rosa"
+                                }
+                                .into(),
+                                count: 3,
+                                timestamp: now(),
+                                source: "demo".into(),
+                                status: "received".into(),
+                            },
+                        },
+                    ))
+                    .await
+                    .is_err()
+            {
+                return Ok(());
+            }
         }
     }
 }
@@ -123,6 +171,10 @@ mod tests {
     use super::*;
     #[tokio::test]
     async fn demo_connects_and_can_be_cancelled() {
+        let event: LiveEvent = serde_json::from_str(r#"{"kind":"gift","id":"gift:ana:5655:123","user":"ana","name":"Rosa","count":3,"timestamp":1791650000000,"source":"real"}"#).unwrap();
+        assert!(
+            matches!(event, LiveEvent::Gift {gift} if gift.count == 3 && gift.source == "real" && gift.status == "received")
+        );
         let (tx, mut rx) = mpsc::channel(8);
         let task = tokio::spawn(Box::new(MockLiveConnector).run("ana".into(), 7, tx));
         assert!(
