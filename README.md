@@ -8,6 +8,8 @@ El TTS funciona localmente, sin suscripciones ni servicios de generación de voz
 
 **Estado: MVP 0.1.0.** El modo demostración y la lectura de comentarios de un LIVE real se validaron en un Mac Apple Silicon. Este repositorio distribuye el código fuente para compilarlo localmente; no incluye un instalador firmado ni un paquete universal.
 
+![Captura de TikTok Live TTS para macOS](./screenshot.png)
+
 ## Funcionalidades
 
 - Conexión a TikTok LIVE por nombre de usuario, desconexión y reintentos con backoff.
@@ -23,14 +25,14 @@ El TTS funciona localmente, sin suscripciones ni servicios de generación de voz
 
 ## Compatibilidad
 
-| Componente | Requisito |
-| --- | --- |
-| Sistema | macOS; versión mínima configurada de la app: 13.0 |
-| Arquitectura validada | Apple Silicon, `arm64` |
-| Node.js | **22.12 o superior**, instalado para la arquitectura del Mac |
-| Rust | Canal estable, con Cargo |
-| Herramientas Apple | Xcode Command Line Tools con Swift y SDK macOS, o Xcode completo |
-| Red | Necesaria para instalar dependencias y conectar a un LIVE real |
+| Componente            | Requisito                                                        |
+| --------------------- | ---------------------------------------------------------------- |
+| Sistema               | macOS; versión mínima configurada de la app: 13.0                |
+| Arquitectura validada | Apple Silicon, `arm64`                                           |
+| Node.js               | **22.12 o superior**, instalado para la arquitectura del Mac     |
+| Rust                  | Canal estable, con Cargo                                         |
+| Herramientas Apple    | Xcode Command Line Tools con Swift y SDK macOS, o Xcode completo |
+| Red                   | Necesaria para instalar dependencias y conectar a un LIVE real   |
 
 La compatibilidad con la versión mínima de macOS y con Intel no se ha probado en hardware independiente. El empaquetado incluye Node y el helper Swift de la arquitectura de la máquina que compila. Para un Mac Intel hay que compilar en Intel con sus herramientas correspondientes; cambiar solo el target de Rust no genera un paquete completo para otra arquitectura.
 
@@ -147,14 +149,14 @@ Compilar localmente no implica firma Developer ID ni notarización. Para distrib
 5. **Moderar:** abre **Filtros y moderación**, ajusta palabras bloqueadas, usuarios, longitud, capacidad y caducidad, y guarda los cambios. Los filtros se aplican a los nuevos comentarios.
 6. **Guardar historial:** activa su opción si quieres conservar comentarios entre sesiones. Puedes borrarlo desde **Historial**.
 
-| Control | Comportamiento |
-| --- | --- |
-| Pausar | Conserva la locución actual y los pendientes |
-| Reanudar | Continúa la locución o inicia el siguiente pendiente |
-| Siguiente | Cancela la lectura actual y pasa al siguiente comentario |
-| Detener | Cancela la lectura, vacía la cola y la deja en pausa hasta reanudar |
-| Desconectar | Detiene la recepción; los pendientes pueden seguir leyéndose |
-| Limpiar vista | Retira comentarios visibles; no borra el historial ni la cola |
+| Control       | Comportamiento                                                      |
+| ------------- | ------------------------------------------------------------------- |
+| Pausar        | Conserva la locución actual y los pendientes                        |
+| Reanudar      | Continúa la locución o inicia el siguiente pendiente                |
+| Siguiente     | Cancela la lectura actual y pasa al siguiente comentario            |
+| Detener       | Cancela la lectura, vacía la cola y la deja en pausa hasta reanudar |
+| Desconectar   | Detiene la recepción; los pendientes pueden seguir leyéndose        |
+| Limpiar vista | Retira comentarios visibles; no borra el historial ni la cola       |
 
 Las ondas del reproductor indican actividad, no un porcentaje de progreso. La lectura siguiente comienza cuando macOS confirma que terminó la anterior.
 
@@ -237,30 +239,30 @@ AVSpeechSynthesizer de macOS
 Evento real de finalización → siguiente comentario
 ```
 
-| Carpeta | Responsabilidad |
-| --- | --- |
-| `src/` | Interfaz React/TypeScript, componentes y estado Zustand |
-| `src-tauri/src/` | Dominio, actor Tokio, conectores, voz y SQLite |
-| `bridge/` | Adaptación de eventos de TikTok a JSONL y pruebas de contrato |
-| `native/` | Helper Swift de AVFoundation e icono fuente |
-| `scripts/` | Preparación de recursos y ejecución de Tauri |
-| `tests/` | Comprobaciones opcionales de voz y LIVE auténtico |
+| Carpeta          | Responsabilidad                                               |
+| ---------------- | ------------------------------------------------------------- |
+| `src/`           | Interfaz React/TypeScript, componentes y estado Zustand       |
+| `src-tauri/src/` | Dominio, actor Tokio, conectores, voz y SQLite                |
+| `bridge/`        | Adaptación de eventos de TikTok a JSONL y pruebas de contrato |
+| `native/`        | Helper Swift de AVFoundation e icono fuente                   |
+| `scripts/`       | Preparación de recursos y ejecución de Tauri                  |
+| `tests/`         | Comprobaciones opcionales de voz y LIVE auténtico             |
 
 El frontend usa Tailwind y un componente Button basado en shadcn/ui. Rust controla la lógica principal y comunica snapshots tipados a React mediante comandos y eventos Tauri. Los tokens de locución y las generaciones de conexión evitan que cancelaciones o eventos antiguos afecten a una sesión nueva.
 
 ## Solución de problemas
 
-| Problema | Qué comprobar |
-| --- | --- |
-| `cargo` o `rustc` no encontrado | Instala Rust y abre otra Terminal, o carga `$HOME/.cargo/env` |
-| `swiftc` o SDK no disponible | Instala Command Line Tools y revisa `xcode-select -p` |
-| Error de licencia de Xcode | Revisa y acepta su licencia, o usa las Command Line Tools instaladas |
-| Puerto 1420 ocupado | Cierra el proceso de desarrollo anterior antes de volver a iniciar Tauri |
-| No hay voz o macOS cancela la lectura | Revisa las voces instaladas y prueba la `.app` desde una sesión normal de macOS |
-| Usuario sin LIVE o error de firma | Comprueba la transmisión, el usuario y la disponibilidad/cuota del proveedor de firma |
-| `filtrado: repetido` | Se recibió el mismo texto del mismo autor dentro de la ventana de deduplicación |
-| `filtrado: vacío` en todos los mensajes reales | Actualiza el código y recompila; el adaptador actual lee `content` de proto v3 |
-| Error al crear `.dmg` | Genera solo `.app` y ejecuta el empaquetado fuera de un entorno restringido |
+| Problema                                       | Qué comprobar                                                                         |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `cargo` o `rustc` no encontrado                | Instala Rust y abre otra Terminal, o carga `$HOME/.cargo/env`                         |
+| `swiftc` o SDK no disponible                   | Instala Command Line Tools y revisa `xcode-select -p`                                 |
+| Error de licencia de Xcode                     | Revisa y acepta su licencia, o usa las Command Line Tools instaladas                  |
+| Puerto 1420 ocupado                            | Cierra el proceso de desarrollo anterior antes de volver a iniciar Tauri              |
+| No hay voz o macOS cancela la lectura          | Revisa las voces instaladas y prueba la `.app` desde una sesión normal de macOS       |
+| Usuario sin LIVE o error de firma              | Comprueba la transmisión, el usuario y la disponibilidad/cuota del proveedor de firma |
+| `filtrado: repetido`                           | Se recibió el mismo texto del mismo autor dentro de la ventana de deduplicación       |
+| `filtrado: vacío` en todos los mensajes reales | Actualiza el código y recompila; el adaptador actual lee `content` de proto v3        |
+| Error al crear `.dmg`                          | Genera solo `.app` y ejecuta el empaquetado fuera de un entorno restringido           |
 
 Para instalar más voces, busca las opciones de lectura y voz en **Ajustes del Sistema → Accesibilidad**; sus nombres pueden variar con la versión de macOS.
 
